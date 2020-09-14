@@ -26,6 +26,7 @@ build_jars() {
   mkdir -p "$JAR_DIR"
   for p in "${JAVA_DIRS_PATH[@]}"; do
     cd "$WORKSPACE_DIR/$p"
+    bazel build cp_java_generated
     if [[ $bazel_build == "true" ]]; then
       echo "Starting building java native dependencies for $p"
       bazel build gen_maven_deps
@@ -90,9 +91,9 @@ download_jars() {
   local sleep_time_units=60
 
   for f in "$@"; do
-    for os in 'darwin' 'windows'; do
+    for os in 'darwin' 'linux' 'windows'; do
       if [[ "$os" == "windows" ]]; then
-        break
+        continue
       fi
       local url="https://ray-wheels.s3-us-west-2.amazonaws.com/jars/$TRAVIS_BRANCH/$TRAVIS_COMMIT/$os/$f"
       mkdir -p "$JAR_BASE_DIR/$os"
@@ -115,6 +116,7 @@ download_jars() {
       done
     done
   done
+  echo "Download jars took $wait_time seconds"
 }
 
 # prepare native binaries and libraries.
@@ -166,11 +168,11 @@ deploy_jars() {
   if native_files_exist; then
     (
       cd "$WORKSPACE_DIR/java"
-      mvn -T16 deploy -Dmaven.test.skip=true -Dcheckstyle.skip -Prelease
+      mvn -T16 install deploy -Dmaven.test.skip=true -Dcheckstyle.skip -Prelease -Dgpg.skip="${GPG_SKIP:-true}"
     )
     (
       cd "$WORKSPACE_DIR/streaming/java"
-      mvn -T16 deploy -Dmaven.test.skip=true -Dcheckstyle.skip -Prelease
+      mvn -T16 deploy -Dmaven.test.skip=true -Dcheckstyle.skip -Prelease -Dgpg.skip="${GPG_SKIP:-true}"
     )
     echo "Finished deploying jars"
   else
