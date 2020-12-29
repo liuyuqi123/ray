@@ -14,8 +14,10 @@ import requests
 
 # __doc_define_servable_v0_begin__
 @serve.accept_batch
-def batch_adder_v0(flask_requests: List):
-    numbers = [int(request.args["number"]) for request in flask_requests]
+def batch_adder_v0(starlette_requests: List):
+    numbers = [
+        int(request.query_params["number"]) for request in starlette_requests
+    ]
 
     input_array = np.array(numbers)
     print("Our input array has shape:", input_array.shape)
@@ -28,8 +30,8 @@ def batch_adder_v0(flask_requests: List):
 
 # __doc_define_servable_v0_end__
 
+ray.init(num_cpus=8)
 # __doc_deploy_begin__
-ray.init(num_cpus=10)
 client = serve.start()
 client.create_backend("adder:v0", batch_adder_v0, config={"max_batch_size": 4})
 client.create_endpoint(
@@ -58,7 +60,7 @@ print("Result returned:", results)
 # __doc_define_servable_v1_begin__
 @serve.accept_batch
 def batch_adder_v1(requests: List):
-    numbers = [int(request.args["number"]) for request in requests]
+    numbers = [int(request.query_params["number"]) for request in requests]
     input_array = np.array(numbers)
     print("Our input array has shape:", input_array.shape)
     # Sleep for 200ms, this could be performing CPU intensive computation

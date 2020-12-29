@@ -182,8 +182,8 @@ class GANOperator(TrainingOperator):
     @override(TrainingOperator)
     def train_batch(self, batch, batch_info):
         """Trains on one batch of data from the data creator."""
-        real_label = 1
-        fake_label = 0
+        real_label = 1.0
+        fake_label = 0.
         discriminator, generator = self.models
         optimD, optimG = self.optimizers
 
@@ -289,7 +289,10 @@ if __name__ == "__main__":
         default=False,
         help="Enables GPU training")
     args = parser.parse_args()
-    ray.init(address=args.address)
+    if args.smoke_test:
+        ray.init(num_cpus=2)
+    else:
+        ray.init(address=args.address)
 
     trainer = train_example(
         num_workers=args.num_workers,

@@ -174,6 +174,7 @@ Papers
 ------
 
 - `Ray 1.0 Architecture whitepaper`_ **(new)**
+- `Ray Design Patterns`_ **(new)**
 - `RLlib paper`_
 - `Tune paper`_
 
@@ -183,6 +184,7 @@ Papers
 - `Ray HotOS paper`_
 
 .. _`Ray 1.0 Architecture whitepaper`: https://docs.google.com/document/d/1lAy0Owi-vPz2jEqBSaHNQcy2IBSDEHyXNOQZlGuj93c/preview
+.. _`Ray Design Patterns`: https://docs.google.com/document/d/167rnnDFIVRhHhK4mznEIemOtj63IOhtIPvSYaPgI4Fg/edit
 .. _`Ray paper`: https://arxiv.org/abs/1712.05889
 .. _`Ray HotOS paper`: https://arxiv.org/abs/1703.03924
 .. _`RLlib paper`: https://arxiv.org/abs/1712.09381
@@ -194,6 +196,7 @@ Papers
    :caption: Overview of Ray
 
    ray-overview/index.rst
+   ray-libraries.rst
    installation.rst
 
 .. toctree::
@@ -204,6 +207,7 @@ Papers
    walkthrough.rst
    using-ray.rst
    configure.rst
+   ray-dashboard.rst
    Tutorial and Examples <auto_examples/overview.rst>
    package-ref.rst
 
@@ -215,7 +219,6 @@ Papers
    cluster/index.rst
    cluster/launcher.rst
    cluster/autoscaling.rst
-   cluster/cloud.rst
    cluster/deploy.rst
 
 .. toctree::
@@ -229,6 +232,7 @@ Papers
    serve/deployment.rst
    serve/advanced.rst
    serve/architecture.rst
+   serve/faq.rst
    serve/package-ref.rst
 
 .. toctree::
@@ -270,17 +274,19 @@ Papers
    raysgd/raysgd_pytorch.rst
    raysgd/raysgd_tensorflow.rst
    raysgd/raysgd_dataset.rst
+   raysgd/raysgd_ptl.rst
+   raysgd/raysgd_tune.rst
    raysgd/raysgd_ref.rst
 
 .. toctree::
    :hidden:
    :maxdepth: -1
-   :caption: Community Libraries
+   :caption: More Libraries
 
    multiprocessing.rst
    joblib.rst
    iter.rst
-   pandas_on_ray.rst
+   xgboost-ray.rst
    dask-on-ray.rst
    mars-on-ray.rst
 
@@ -290,6 +296,7 @@ Papers
    :caption: Ray Observability
 
    ray-metrics.rst
+   ray-debugging.rst
 
 .. toctree::
    :hidden:

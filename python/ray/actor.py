@@ -1,17 +1,23 @@
 import inspect
 import logging
 import weakref
+import _thread
 
 import ray.ray_constants as ray_constants
 import ray._raylet
 import ray.signature as signature
 import ray.worker
-from ray.util.placement_group import PlacementGroup, \
-    check_placement_group_index
+from ray.util.placement_group import (
+    PlacementGroup, check_placement_group_index, get_current_placement_group)
 
 from ray import ActorClassID, Language
 from ray._raylet import PythonFunctionDescriptor
 from ray import cross_language
+from ray.util.inspect import (
+    is_function_or_method,
+    is_class_method,
+    is_static_method,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +201,7 @@ class ActorClassMethodMetadata(object):
         self = cls.__new__(cls)
 
         actor_methods = inspect.getmembers(modified_class,
-                                           ray.utils.is_function_or_method)
+                                           is_function_or_method)
         self.methods = dict(actor_methods)
 
         # Extract the signatures of each of the methods. This will be used
@@ -208,9 +214,8 @@ class ActorClassMethodMetadata(object):
             # Whether or not this method requires binding of its first
             # argument. For class and static methods, we do not want to bind
             # the first argument, but we do for instance methods
-            is_bound = (ray.utils.is_class_method(method)
-                        or ray.utils.is_static_method(modified_class,
-                                                      method_name))
+            is_bound = (is_class_method(method)
+                        or is_static_method(modified_class, method_name))
 
             # Print a warning message if the method signature is not
             # supported. We don't raise an exception because if the actor
@@ -402,23 +407,66 @@ class ActorClass:
         """
         return self._remote(args=args, kwargs=kwargs)
 
-    def options(self, **options):
-        """Convenience method for creating an actor with options.
+    def options(self,
+                args=None,
+                kwargs=None,
+                num_cpus=None,
+                num_gpus=None,
+                memory=None,
+                object_store_memory=None,
+                resources=None,
+                accelerator_type=None,
+                max_concurrency=None,
+                max_restarts=None,
+                max_task_retries=None,
+                name=None,
+                lifetime=None,
+                placement_group=None,
+                placement_group_bundle_index=-1,
+                placement_group_capture_child_tasks=None,
+                override_environment_variables=None):
+        """Configures and overrides the actor instantiation parameters.
 
-        Same arguments as Actor._remote(), but returns a wrapped actor class
-        that a non-underscore .remote() can be called on.
+        The arguments are the same as those that can be passed
+        to :obj:`ray.remote`.
 
         Examples:
-            # The following two calls are equivalent.
-            >>> Actor._remote(num_cpus=4, max_concurrency=8, args=[x, y])
-            >>> Actor.options(num_cpus=4, max_concurrency=8).remote(x, y)
+
+        .. code-block:: python
+
+            @ray.remote(num_cpus=2, resources={"CustomResource": 1})
+            class Foo:
+                def method(self):
+                    return 1
+            # Class Foo will require 1 cpu instead of 2.
+            # It will also require no custom resources.
+            Bar = Foo.options(num_cpus=1, resources=None)
         """
 
         actor_cls = self
 
         class ActorOptionWrapper:
             def remote(self, *args, **kwargs):
-                return actor_cls._remote(args=args, kwargs=kwargs, **options)
+                return actor_cls._remote(
+                    args=args,
+                    kwargs=kwargs,
+                    num_cpus=num_cpus,
+                    num_gpus=num_gpus,
+                    memory=memory,
+                    object_store_memory=object_store_memory,
+                    resources=resources,
+                    accelerator_type=accelerator_type,
+                    max_concurrency=max_concurrency,
+                    max_restarts=max_restarts,
+                    max_task_retries=max_task_retries,
+                    name=name,
+                    lifetime=lifetime,
+                    placement_group=placement_group,
+                    placement_group_bundle_index=placement_group_bundle_index,
+                    placement_group_capture_child_tasks=(
+                        placement_group_capture_child_tasks),
+                    override_environment_variables=(
+                        override_environment_variables))
 
         return ActorOptionWrapper()
 
@@ -437,7 +485,9 @@ class ActorClass:
                 name=None,
                 lifetime=None,
                 placement_group=None,
-                placement_group_bundle_index=-1):
+                placement_group_bundle_index=-1,
+                placement_group_capture_child_tasks=None,
+                override_environment_variables=None):
         """Create an actor.
 
         This method allows more flexibility than the remote method because
@@ -471,6 +521,12 @@ class ActorClass:
             placement_group_bundle_index: the index of the bundle
                 if the actor belongs to a placement group, which may be -1 to
                 specify any available bundle.
+            placement_group_capture_child_tasks: Whether or not children tasks
+                of this actor should implicitly use the same placement group
+                as its parent. It is True by default.
+            override_environment_variables: Environment variables to override
+                and/or introduce for this actor.  This is a dictionary mapping
+                variable names to their values.
 
         Returns:
             A handle to the newly created actor.
@@ -528,7 +584,15 @@ class ActorClass:
         else:
             raise ValueError("lifetime must be either `None` or 'detached'")
 
+        if placement_group_capture_child_tasks is None:
+            placement_group_capture_child_tasks = (
+                worker.should_capture_child_tasks_in_placement_group)
+
         if placement_group is None:
+            if placement_group_capture_child_tasks:
+                placement_group = get_current_placement_group()
+
+        if not placement_group:
             placement_group = PlacementGroup.empty()
 
         check_placement_group_index(placement_group,
@@ -607,8 +671,11 @@ class ActorClass:
             is_asyncio,
             placement_group.id,
             placement_group_bundle_index,
+            placement_group_capture_child_tasks,
             # Store actor_method_cpu in actor handle's extension data.
-            extension_data=str(actor_method_cpu))
+            extension_data=str(actor_method_cpu),
+            override_environment_variables=override_environment_variables
+            or dict())
 
         actor_handle = ActorHandle(
             meta.language,
@@ -894,7 +961,7 @@ def modify_class(cls):
     Class.__module__ = cls.__module__
     Class.__name__ = cls.__name__
 
-    if not ray.utils.is_function_or_method(getattr(Class, "__init__", None)):
+    if not is_function_or_method(getattr(Class, "__init__", None)):
         # Add __init__ if it does not exist.
         # Actor creation will be executed with __init__ together.
 
@@ -940,6 +1007,7 @@ def exit_actor():
     """Intentionally exit the current actor.
 
     This function is used to disconnect an actor and exit the worker.
+    Any ``atexit`` handlers installed in the actor will be run.
 
     Raises:
         Exception: An exception is raised if this is a driver or this
@@ -952,6 +1020,14 @@ def exit_actor():
         ray.disconnect()
         # Disconnect global state from GCS.
         ray.state.state.disconnect()
+
+        # In asyncio actor mode, we can't raise SystemExit because it will just
+        # quit the asycnio event loop thread, not the main thread. Instead, we
+        # raise an interrupt signal to the main thread to tell it to exit.
+        if worker.core_worker.current_actor_is_asyncio():
+            _thread.interrupt_main()
+            return
+
         # Set a flag to indicate this is an intentional actor exit. This
         # reduces log verbosity.
         exit = SystemExit(0)

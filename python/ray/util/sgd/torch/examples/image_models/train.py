@@ -128,8 +128,10 @@ def main():
     setup_default_logging()
 
     args, args_text = parse_args()
-
-    ray.init(address=args.ray_address)
+    if args.smoke_test:
+        ray.init(num_cpus=int(args.ray_num_workers))
+    else:
+        ray.init(address=args.ray_address)
 
     CustomTrainingOperator = TrainingOperator.from_creators(
         model_creator=model_creator,
@@ -140,7 +142,6 @@ def main():
         training_operator_cls=CustomTrainingOperator,
         use_tqdm=True,
         use_fp16=args.amp,
-        apex_args={"opt_level": "O1"},
         config={
             "args": args,
             BATCH_SIZE: args.batch_size

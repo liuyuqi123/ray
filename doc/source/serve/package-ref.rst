@@ -15,13 +15,17 @@ Backend Configuration
 ---------------------
 .. autoclass:: ray.serve.BackendConfig
 
-Handle API
-----------
+.. autoclass:: ray.serve.CondaEnv
+
+.. _`servehandle-api`:
+
+ServeHandle API
+---------------
 .. autoclass:: ray.serve.handle.RayServeHandle
     :members: remote, options
 
 When calling from Python, the backend implementation will receive ``ServeRequest``
-objects instead of Flask requests.
+objects instead of Starlette requests.
 
 .. autoclass:: ray.serve.utils.ServeRequest
     :members:
@@ -29,3 +33,6 @@ objects instead of Flask requests.
 Batching Requests
 -----------------
 .. autofunction:: ray.serve.accept_batch
+
+Built-in Backends
+.. autoclass:: ray.serve.backends.ImportedBackend

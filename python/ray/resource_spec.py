@@ -1,7 +1,6 @@
 import math
 from collections import namedtuple
 import logging
-import multiprocessing
 import os
 import re
 import subprocess
@@ -105,7 +104,9 @@ class ResourceSpec(
         # Check types.
         for resource_label, resource_quantity in resources.items():
             assert (isinstance(resource_quantity, int)
-                    or isinstance(resource_quantity, float))
+                    or isinstance(resource_quantity, float)), (
+                        f"{resource_label} ({type(resource_quantity)}): "
+                        f"{resource_quantity}")
             if (isinstance(resource_quantity, float)
                     and not resource_quantity.is_integer()):
                 raise ValueError(
@@ -140,7 +141,7 @@ class ResourceSpec(
         assert "object_store_memory" not in resources, resources
 
         if node_ip_address is None:
-            node_ip_address = ray.services.get_node_ip_address()
+            node_ip_address = ray._private.services.get_node_ip_address()
 
         # Automatically create a node id resource on each node. This is
         # queryable with ray.state.node_ids() and ray.state.current_node_id().
@@ -148,7 +149,7 @@ class ResourceSpec(
 
         num_cpus = self.num_cpus
         if num_cpus is None:
-            num_cpus = multiprocessing.cpu_count()
+            num_cpus = ray.utils.get_num_cpus()
 
         num_gpus = self.num_gpus
         gpu_ids = ray.utils.get_cuda_visible_devices()
@@ -178,7 +179,9 @@ class ResourceSpec(
         avail_memory = ray.utils.estimate_available_memory()
         object_store_memory = self.object_store_memory
         if object_store_memory is None:
-            object_store_memory = int(avail_memory * 0.3)
+            object_store_memory = int(
+                avail_memory *
+                ray_constants.DEFAULT_OBJECT_STORE_MEMORY_PROPORTION)
             # Cap memory to avoid memory waste and perf issues on large nodes
             if (object_store_memory >
                     ray_constants.DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES):

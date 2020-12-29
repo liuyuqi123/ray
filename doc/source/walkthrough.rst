@@ -1,3 +1,5 @@
+.. _core-walkthrough:
+
 Ray Core Walkthrough
 ====================
 
@@ -48,7 +50,7 @@ You can start Ray on a single machine by adding this to your code.
 
       public static void main(String[] args) {
         // Start Ray runtime. If you're connecting to an existing cluster, you can set
-        // the `-Dray.redis.address=<cluster-address>` java system property.
+        // the `-Dray.address=<cluster-address>` java system property.
         Ray.init();
         ...
       }
@@ -179,6 +181,7 @@ Note the following behaviors:
      first task (the value corresponding to ``obj_ref1/objRef1``) will be sent over the
      network to the machine where the second task is scheduled.
 
+.. _resource-requirements:
 
 Specifying required resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -287,6 +290,13 @@ Cancelling tasks
       obj_ref = blocking_operation.remote()
       ray.cancel(obj_ref)
 
+      from ray.exceptions import TaskCancelledError
+
+      try: 
+          ray.get(obj_ref)
+      except TaskCancelledError: 
+          print("Object reference was cancelled.")
+
   .. group-tab:: Java
 
     Task cancellation hasn't been implemented in Java yet.
@@ -351,7 +361,7 @@ If the current node's object store does not contain the object, the object is do
       from ray.exceptions import GetTimeoutError
 
       @ray.remote
-      def long_running_function()
+      def long_running_function():
           time.sleep(8)
 
       obj_ref = long_running_function.remote()
@@ -406,6 +416,8 @@ actors.
     Objects created with ``put`` are pinned in memory while a Python/Java reference
     to the object ref returned by the put exists. This only applies to the specific
     ref returned by put, not refs in general or copies of that refs.
+
+See also: `object spilling <advanced.html#object-spilling>`__.
 
 Remote Classes (Actors)
 -----------------------
@@ -487,7 +499,7 @@ value.
 
     # Call the actor.
     obj_ref = counter.increment.remote()
-    ray.get(obj_ref) == 1
+    assert ray.get(obj_ref) == 1
 
   .. code-tab:: java
 

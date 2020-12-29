@@ -1,4 +1,5 @@
 # yapf: disable
+import ray
 # __doc_import_begin__
 from ray import serve
 
@@ -53,9 +54,9 @@ class BoostingModel:
         with open(LABEL_PATH) as f:
             self.label_list = json.load(f)
 
-    def __call__(self, flask_request):
-        payload = flask_request.json
-        print("Worker: received flask request with data", payload)
+    async def __call__(self, starlette_request):
+        payload = await starlette_request.json()
+        print("Worker: received starlette request with data", payload)
 
         input_vector = [
             payload["sepal length"],
@@ -70,6 +71,7 @@ class BoostingModel:
 
 # __doc_define_servable_end__
 
+ray.init(num_cpus=8)
 # __doc_deploy_begin__
 client = serve.start()
 client.create_backend("lr:v1", BoostingModel)

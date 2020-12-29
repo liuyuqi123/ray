@@ -1,26 +1,50 @@
+.. _cross_language:
+
 Cross-language programming
 ==========================
 
 This page will show you how to use Ray's cross-language programming feature.
 
-Setup the cluster
+Setup the driver
 -----------------
 
-We need to set the ``--code-search-path`` option on ``ray start`` command. The ``--code-search-path`` option instructs workers to load Java or Python code from the specified code search path.
+We need to set :ref:`code_search_path` in your driver.
 
-.. code-block:: bash
+.. tabs::
 
-  ray start ... --code-search-path=/path/to/code
+  .. group-tab:: Python
 
-You can also provide multiple directories for this option.
+    .. code-block:: python
 
-.. code-block:: bash
+      ray.init(job_config=ray.job_config.JobConfig(code_search_path="/path/to/code"))
 
-  ray start ... --code-search-path=/path/to/jars1:/path/to/jars2:/path/to/pys1:/path/to/pys2
+  .. group-tab:: Java
 
-.. note:
+    .. code-block:: bash
 
-  If ``--code-search-path`` is specified, you can only run remote functions which can be found in ``--code-search-path``.
+      java -classpath <classpath> \
+        -Dray.address=<address> \
+        -Dray.job.code-search-path=/path/to/code/ \
+        <classname> <args>
+
+You may want to include multiple directories to load both Python and Java code for workers, if they are placed in different directories.
+
+.. tabs::
+
+  .. group-tab:: Python
+
+    .. code-block:: python
+
+      ray.init(job_config=ray.job_config.JobConfig(code_search_path="/path/to/jars:/path/to/pys"))
+
+  .. group-tab:: Java
+
+    .. code-block:: bash
+
+      java -classpath <classpath> \
+        -Dray.address=<address> \
+        -Dray.job.code-search-path=/path/to/jars:/path/to/pys \
+        <classname> <args>
 
 Python calling Java
 -------------------

@@ -1,11 +1,17 @@
+from typing import Callable, Dict, Type
+
+from contextlib import contextmanager
 import os
 import logging
+import shutil
+import tempfile
+
 from filelock import FileLock
 
 import ray
 from ray import tune
 from ray.tune.resources import Resources
-from ray.tune.trainable import TrainableUtil
+from ray.tune.utils.trainable import TrainableUtil
 from ray.tune.result import RESULT_DUPLICATE
 from ray.tune.logger import NoopLogger
 
@@ -15,16 +21,56 @@ from horovod.ray import RayExecutor
 logger = logging.getLogger(__name__)
 
 
-def get_rank():
+def get_rank() -> str:
+    """Returns rank of worker."""
     return os.environ["HOROVOD_RANK"]
 
 
-def logger_creator(log_config, logdir):
+def logger_creator(log_config: Dict, logdir: str) -> NoopLogger:
     """Simple NOOP logger for worker trainables."""
     index = get_rank()
     worker_dir = os.path.join(logdir, "worker_{}".format(index))
     os.makedirs(worker_dir, exist_ok=True)
     return NoopLogger(log_config, worker_dir)
+
+
+@contextmanager
+def distributed_checkpoint_dir(step: int, disable: bool = False):
+    """ContextManager for creating a distributed checkpoint.
+
+    Only checkpoints a file on the "main" training actor, avoiding
+    redundant work.
+
+    Args:
+        step (int): Used to label the checkpoint
+        disable (bool): Disable for prototyping.
+
+    Yields:
+        str: A path to a directory. This path will be used
+        again when invoking the training_function.
+
+    Example:
+
+    .. code-block:: python
+
+        def train_func(config, checkpoint_dir):
+            if checkpoint_dir:
+                path = os.path.join(checkpoint_dir, "checkpoint")
+                model_state_dict = torch.load(path)
+
+            if epoch % 3 == 0:
+                with distributed_checkpoint_dir(step=epoch) as checkpoint_dir:
+                    path = os.path.join(checkpoint_dir, "checkpoint")
+                    torch.save(model.state_dict(), path)
+    """
+
+    if int(get_rank()) == 0 and not disable:
+        with tune.checkpoint_dir(step=step) as checkpoint_dir:
+            yield checkpoint_dir
+    else:
+        path = tempfile.mkdtemp()
+        yield path
+        shutil.rmtree(path)
 
 
 class _HorovodTrainable(tune.Trainable):
@@ -51,7 +97,7 @@ class _HorovodTrainable(tune.Trainable):
     def num_workers(self):
         return self._num_hosts * self._num_slots
 
-    def setup(self, config):
+    def setup(self, config: Dict):
         trainable = wrap_function(self.__class__._function)
         # We use a filelock here to ensure that the file-writing
         # process is safe across different trainables.
@@ -82,7 +128,7 @@ class _HorovodTrainable(tune.Trainable):
                 "logger_creator": lambda cfg: logger_creator(cfg, logdir_)
             })
 
-    def step(self):
+    def step(self) -> Dict:
         if self._finished:
             raise RuntimeError("Training has already finished.")
         result = self.executor.execute(lambda w: w.step())[0]
@@ -90,30 +136,32 @@ class _HorovodTrainable(tune.Trainable):
             self._finished = True
         return result
 
-    def save_checkpoint(self, checkpoint_dir):
+    def save_checkpoint(self, checkpoint_dir: str) -> str:
         # TODO: optimize if colocated
         save_obj = self.executor.execute_single(lambda w: w.save_to_object())
         checkpoint_path = TrainableUtil.create_from_pickle(
             save_obj, checkpoint_dir)
         return checkpoint_path
 
-    def load_checkpoint(self, checkpoint_dir):
+    def load_checkpoint(self, checkpoint_dir: str):
         checkpoint_obj = TrainableUtil.checkpoint_to_object(checkpoint_dir)
         x_id = ray.put(checkpoint_obj)
-        return self.executor.execute(lambda w: w.restore_from_object(x_id))
+        return self.executor.execute(
+            lambda w: w.restore_from_object(ray.get(x_id)))
 
     def stop(self):
         self.executor.execute(lambda w: w.stop())
         self.executor.shutdown()
 
 
-def DistributedTrainableCreator(func,
-                                use_gpu=False,
-                                num_hosts=1,
-                                num_slots=1,
-                                num_cpus_per_slot=1,
-                                timeout_s=30,
-                                replicate_pem=False):
+def DistributedTrainableCreator(
+        func: Callable,
+        use_gpu: bool = False,
+        num_hosts: int = 1,
+        num_slots: int = 1,
+        num_cpus_per_slot: int = 1,
+        timeout_s: int = 30,
+        replicate_pem: bool = False) -> Type[_HorovodTrainable]:
     """Converts Horovod functions to be executable by Tune.
 
     Requires horovod > 0.19 to work.
@@ -198,7 +246,7 @@ def DistributedTrainableCreator(func,
         _timeout_s = timeout_s
 
         @classmethod
-        def default_resource_request(cls, config):
+        def default_resource_request(cls, config: Dict):
             extra_gpu = int(num_hosts * num_slots) * int(use_gpu)
             extra_cpu = int(num_hosts * num_slots * num_cpus_per_slot)
 
@@ -216,11 +264,17 @@ def DistributedTrainableCreator(func,
 # that force us to include mocks as part of the module.
 
 
-def _train_simple(config):
+def _train_simple(config: Dict):
     import horovod.torch as hvd
     hvd.init()
     from ray import tune
     for i in range(config.get("epochs", 2)):
         import time
         time.sleep(1)
+        if config.get("enable_checkpoint", True):
+            with distributed_checkpoint_dir(step=i) as checkpoint_dir:
+                path = os.path.join(checkpoint_dir, "checkpoint")
+                import pickle
+                with open(path, "wb") as f:
+                    pickle.dump("hi", f)
         tune.report(test=1, rank=hvd.rank())

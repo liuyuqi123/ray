@@ -1,3 +1,5 @@
+"""PyTorch policy class used for DQN"""
+
 from typing import Dict, List, Tuple
 
 import gym
@@ -12,9 +14,9 @@ from ray.rllib.models.modelv2 import ModelV2
 from ray.rllib.models.torch.torch_action_dist import (TorchCategorical,
                                                       TorchDistributionWrapper)
 from ray.rllib.policy.policy import Policy
+from ray.rllib.policy.policy_template import build_policy_class
 from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.policy.torch_policy import LearningRateSchedule
-from ray.rllib.policy.torch_policy_template import build_torch_policy
 from ray.rllib.utils.error import UnsupportedSpaceException
 from ray.rllib.utils.exploration.parameter_noise import ParameterNoise
 from ray.rllib.utils.framework import try_import_torch
@@ -31,13 +33,13 @@ if nn:
 
 class QLoss:
     def __init__(self,
-                 q_t_selected,
-                 q_logits_t_selected,
-                 q_tp1_best,
-                 q_probs_tp1_best,
-                 importance_weights,
-                 rewards,
-                 done_mask,
+                 q_t_selected: TensorType,
+                 q_logits_t_selected: TensorType,
+                 q_tp1_best: TensorType,
+                 q_probs_tp1_best: TensorType,
+                 importance_weights: TensorType,
+                 rewards: TensorType,
+                 done_mask: TensorType,
                  gamma=0.99,
                  n_step=1,
                  num_atoms=1,
@@ -46,7 +48,8 @@ class QLoss:
 
         if num_atoms > 1:
             # Distributional Q-learning which corresponds to an entropy loss
-            z = torch.range(0.0, num_atoms - 1, dtype=torch.float32)
+            z = torch.range(
+                0.0, num_atoms - 1, dtype=torch.float32).to(rewards.device)
             z = v_min + z * (v_max - v_min) / float(num_atoms - 1)
 
             # (batch_size, 1) * (1, num_atoms) = (batch_size, num_atoms)
@@ -103,6 +106,11 @@ class QLoss:
 
 
 class ComputeTDErrorMixin:
+    """Assign the `compute_td_error` method to the DQNTorchPolicy
+
+    This allows us to prioritize on the worker side.
+    """
+
     def __init__(self):
         def compute_td_error(obs_t, act_t, rew_t, obs_tp1, done_mask,
                              importance_weights):
@@ -122,9 +130,22 @@ class ComputeTDErrorMixin:
 
 
 def build_q_model_and_distribution(
-        policy: Policy, obs_space: gym.Space, action_space: gym.Space,
+        policy: Policy, obs_space: gym.spaces.Space,
+        action_space: gym.spaces.Space,
         config: TrainerConfigDict) -> Tuple[ModelV2, TorchDistributionWrapper]:
+    """Build q_model and target_q_model for DQN
 
+    Args:
+        policy (Policy): The policy, which will use the model for optimization.
+        obs_space (gym.spaces.Space): The policy's observation space.
+        action_space (gym.spaces.Space): The policy's action space.
+        config (TrainerConfigDict):
+
+    Returns:
+        (q_model, TorchCategorical)
+            Note: The target q model will not be returned, just assigned to
+            `policy.target_q_model`.
+    """
     if not isinstance(action_space, gym.spaces.Discrete):
         raise UnsupportedSpaceException(
             "Action space {} is not supported for DQN.".format(action_space))
@@ -204,6 +225,16 @@ def get_distribution_inputs_and_class(
 
 def build_q_losses(policy: Policy, model, _,
                    train_batch: SampleBatch) -> TensorType:
+    """Constructs the loss for DQNTorchPolicy.
+
+    Args:
+        policy (Policy): The Policy to calculate the loss for.
+        model (ModelV2): The Model to calculate the loss for.
+        train_batch (SampleBatch): The training data.
+
+    Returns:
+        TensorType: A single loss tensor.
+    """
     config = policy.config
     # Q-network evaluation.
     q_t, q_logits_t, q_probs_t = compute_q_values(
@@ -222,7 +253,7 @@ def build_q_losses(policy: Policy, model, _,
         is_training=True)
 
     # Q scores for actions which we know were selected in the given state.
-    one_hot_selection = F.one_hot(train_batch[SampleBatch.ACTIONS],
+    one_hot_selection = F.one_hot(train_batch[SampleBatch.ACTIONS].long(),
                                   policy.action_space.n)
     q_t_selected = torch.sum(
         torch.where(q_t > FLOAT_MIN, q_t,
@@ -286,11 +317,12 @@ def setup_early_mixins(policy: Policy, obs_space, action_space,
     LearningRateSchedule.__init__(policy, config["lr"], config["lr_schedule"])
 
 
-def after_init(policy: Policy, obs_space: gym.Space, action_space: gym.Space,
-               config: TrainerConfigDict) -> None:
+def before_loss_init(policy: Policy, obs_space: gym.spaces.Space,
+                     action_space: gym.spaces.Space,
+                     config: TrainerConfigDict) -> None:
     ComputeTDErrorMixin.__init__(policy)
     TargetNetworkMixin.__init__(policy, obs_space, action_space, config)
-    # Move target net to device (this is done autoatically for the
+    # Move target net to device (this is done automatically for the
     # policy.model, but not for any other models the policy has).
     policy.target_q_model = policy.target_q_model.to(policy.device)
 
@@ -352,8 +384,9 @@ def extra_action_out_fn(policy: Policy, input_dict, state_batches, model,
     return {"q_values": policy.q_values}
 
 
-DQNTorchPolicy = build_torch_policy(
+DQNTorchPolicy = build_policy_class(
     name="DQNTorchPolicy",
+    framework="torch",
     loss_fn=build_q_losses,
     get_default_config=lambda: ray.rllib.agents.dqn.dqn.DEFAULT_CONFIG,
     make_model_and_action_dist=build_q_model_and_distribution,
@@ -365,7 +398,7 @@ DQNTorchPolicy = build_torch_policy(
     extra_learn_fetches_fn=lambda policy: {"td_error": policy.q_loss.td_error},
     extra_action_out_fn=extra_action_out_fn,
     before_init=setup_early_mixins,
-    after_init=after_init,
+    before_loss_init=before_loss_init,
     mixins=[
         TargetNetworkMixin,
         ComputeTDErrorMixin,
